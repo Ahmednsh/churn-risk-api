@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  training:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r training/requirements.txt
+      - run: pytest -q
+        working-directory: training
+
+  api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - run: dotnet test --configuration Release
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t churn-risk-api .
+      - run: docker run -d --name api -p 8080:8080 churn-risk-api
+      - name: Wait for the API
+        run: |
+          for attempt in $(seq 1 30); do
+            curl -sf http://localhost:8080/health && exit 0
+            sleep 1
+          done
+          docker logs api
+          exit 1
+      - name: Send a real prediction and check the result
+        run: |
+          jq -c '.[0] | del(.expectedProbability)' model/parity_cases.json > customer.json
+          curl -sf -X POST http://localhost:8080/predict -H "Content-Type: application/json" -d @customer.json | tee response.json
+          expected=$(jq '.[0].expectedProbability' model/parity_cases.json)
+          jq -e --argjson expected "$expected" '((.probability - $expected) | fabs) < 0.001' response.json
+          curl -sf http://localhost:8080/monitoring/summary | jq -e '.total == 1'
