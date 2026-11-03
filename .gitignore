@@ -1,0 +1,15 @@
+bin/
+obj/
+*.user
+.vs/
+.vscode/
+TestResults/
+
+__pycache__/
+.pytest_cache/
+.venv/
+
+*.db
+*.db-shm
+*.db-wal
+training/data/
